@@ -2,8 +2,6 @@
 //! used as the static backdrop for the selection overlay, giving the effect
 //! of a frozen screen while selecting.
 
-use std::collections::HashMap;
-
 use wayland_client::protocol::wl_output::WlOutput;
 
 /// Takes a screenshot of every output up front and returns a
@@ -12,42 +10,37 @@ use wayland_client::protocol::wl_output::WlOutput;
 ///
 /// Returns `None` (falling back to the normal, non-frozen overlay) if the
 /// screenshot backend itself couldn't be initialised.
-pub fn capture_backgrounds()
--> Option<impl Fn(&WlOutput, &str) -> Option<cairo::ImageSurface> + 'static> {
-    let wayshot_conn = match libwayshot::WayshotConnection::new() {
-        Ok(conn) => conn,
-        Err(e) => {
-            eprintln!("Warning: freeze: failed to initialize screenshot backend: {e}");
-            return None;
-        }
-    };
-
-    let mut backgrounds: HashMap<String, cairo::ImageSurface> = HashMap::new();
-    for output_info in wayshot_conn.get_all_outputs() {
-        let image = match wayshot_conn.screenshot_single_output(output_info, false) {
+pub fn capture_backgrounds(
+    conn: &wayland_client::Connection,
+) -> Option<impl Fn(&WlOutput, &str) -> Option<cairo::ImageSurface> + 'static> {
+    let conn = conn.clone();
+    Some(move |wl_output: &WlOutput, name: &str| {
+        let conn = conn.clone();
+        let wayshot_conn = match libwayshot::WayshotConnection::from_connection(conn) {
+            Ok(conn) => conn,
+            Err(e) => {
+                eprintln!("Warning: freeze: failed to initialize screenshot backend: {e}");
+                return None;
+            }
+        };
+        let image = match wayshot_conn.screenshot_single_output(wl_output, false) {
             Ok(image) => image,
             Err(e) => {
-                eprintln!(
-                    "Warning: freeze: failed to capture output {}: {e}",
-                    output_info.name
-                );
-                continue;
+                eprintln!("Warning: freeze: failed to capture output {}: {e}", name);
+                return None;
             }
         };
         match image_to_argb_surface(image) {
-            Some(surface) => {
-                backgrounds.insert(output_info.name.clone(), surface);
-            }
+            Some(surface) => Some(surface),
             None => {
                 eprintln!(
                     "Warning: freeze: failed to convert screenshot for output {}",
-                    output_info.name
+                    name
                 );
+                None
             }
         }
-    }
-
-    Some(move |_wl_output: &WlOutput, name: &str| backgrounds.get(name).cloned())
+    })
 }
 
 /// Converts an [`image::DynamicImage`] into a premultiplied-alpha

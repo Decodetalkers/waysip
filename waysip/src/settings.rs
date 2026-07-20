@@ -117,9 +117,12 @@ pub(crate) fn run_selection(
 
     #[cfg(feature = "freeze")]
     if args.freeze
-        && let Some(provider) = crate::freeze::capture_backgrounds()
+        && let Ok(conn) = wayland_client::Connection::connect_to_env()
+        && let Some(provider) = crate::freeze::capture_backgrounds(&conn)
     {
-        builder = builder.with_background_provider(provider);
+        builder = builder
+            .with_background_provider(provider)
+            .with_connection(conn);
     }
 
     match builder.get() {
